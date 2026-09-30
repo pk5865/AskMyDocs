@@ -1,0 +1,49 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AskMyDocs</title>
+<style>
+*{box-sizing:border-box}body{margin:0;font-family:system-ui,sans-serif;background:#f5f6f8;color:#1c2330}
+header{padding:14px 20px;background:#1c2330;color:#fff;font-weight:600}
+main{display:grid;grid-template-columns:300px 1fr;gap:16px;padding:16px;max-width:1100px;margin:auto}
+@media(max-width:800px){main{grid-template-columns:1fr}}
+.card{background:#fff;border-radius:10px;padding:14px;box-shadow:0 1px 3px #0001}
+h3{margin:0 0 10px;font-size:15px}input,textarea,button{font:inherit;padding:8px;border:1px solid #cbd2dc;border-radius:6px;width:100%;margin-bottom:8px}
+button{background:#2f5bea;color:#fff;border:0;cursor:pointer}button.x{background:#e5484d;width:auto;padding:2px 8px;margin:0}
+.doc{display:flex;justify-content:space-between;align-items:center;font-size:13px;padding:6px 0;border-bottom:1px solid #eee;gap:6px;word-break:break-all}
+.tabs button{width:auto;background:#e6e9ef;color:#1c2330;margin-right:6px}.tabs button.on{background:#2f5bea;color:#fff}
+#chat{min-height:320px;max-height:60vh;overflow:auto;margin-bottom:10px}
+.msg{padding:8px 10px;border-radius:8px;margin-bottom:8px;white-space:pre-wrap}.u{background:#e8efff}.b{background:#f0f2f5}
+details{font-size:12px;margin-top:6px}summary{cursor:pointer;color:#2f5bea}.src{background:#fff;border:1px solid #e1e5ec;border-radius:6px;padding:6px;margin-top:4px}
+table{width:100%;border-collapse:collapse;font-size:13px}td,th{border-bottom:1px solid #eee;padding:6px;text-align:left}
+.ok{color:#188038}.no{color:#d93025}#st{font-size:12px;color:#5b6577;min-height:16px}
+</style></head><body>
+<header>AskMyDocs &middot; ask questions, get answers with sources</header>
+<main>
+<div class="card"><h3>Sources</h3>
+<input type="file" id="file" accept=".pdf,.txt"><button onclick="up()">Upload file</button>
+<input id="url" placeholder="Web page or YouTube link"><button onclick="up(true)">Add link</button>
+<div id="st"></div><div id="docs"></div></div>
+<div class="card"><div class="tabs"><button id="t1" class="on" onclick="tab(1)">Ask</button><button id="t2" onclick="tab(2)">Evaluate</button></div><br>
+<div id="p1"><div id="chat"></div><input id="q" placeholder="Ask about your documents..." onkeydown="if(event.key==='Enter')ask()"><button onclick="ask()">Ask</button></div>
+<div id="p2" hidden><p style="font-size:13px;margin-top:0">One test per line: <b>question | keyword that must appear in the answer</b></p>
+<textarea id="cases" rows="6" placeholder="What is the refund period? | 30 days"></textarea><button onclick="ev()">Run evaluation</button><div id="res"></div></div></div>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+const api=async(u,o)=>{const r=await fetch(u,o);const j=await r.json();if(!r.ok)throw new Error(j.error||'Request failed');return j};
+function tab(n){$('p1').hidden=n!=1;$('p2').hidden=n!=2;$('t1').className=n==1?'on':'';$('t2').className=n==2?'on':''}
+function el(t,c,x){const e=document.createElement(t);if(c)e.className=c;if(x!==undefined)e.textContent=x;return e}
+async function load(){const d=await api('/api/docs');$('docs').replaceChildren(...d.map(x=>{const r=el('div','doc');
+ r.append(el('span','',x.name+' ('+x.chunks+' chunks)'));const b=el('button','x','x');b.onclick=async()=>{await api('/api/docs/'+x.doc_id,{method:'DELETE'});load()};r.append(b);return r}))}
+async function up(isUrl){const fd=new FormData();if(isUrl)fd.append('url',$('url').value);else if($('file').files[0])fd.append('file',$('file').files[0]);
+ $('st').textContent='Processing...';try{const r=await api('/api/upload',{method:'POST',body:fd});$('st').textContent='Added: '+r.chunks+' chunks';$('url').value='';load()}catch(e){$('st').textContent='Error: '+e.message}}
+async function ask(){const q=$('q').value.trim();if(!q)return;$('q').value='';$('chat').append(el('div','msg u',q));const b=el('div','msg b','Thinking...');$('chat').append(b);
+ try{const r=await api('/api/ask',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q})});b.textContent=r.answer;
+  if(r.sources.length){const d=el('details');d.append(el('summary','','Sources ('+r.sources.length+')'));r.sources.forEach((s,i)=>{const s1=el('div','src','['+(i+1)+'] '+s.source+' | match '+s.score+'\n'+s.text);s1.style.whiteSpace='pre-wrap';d.append(s1)});b.append(d)}}
+ catch(e){b.textContent='Error: '+e.message}$('chat').scrollTop=1e9}
+async function ev(){const cases=$('cases').value.split('\n').map(l=>l.split('|')).filter(p=>p.length>1).map(p=>({q:p[0].trim(),expect:p[1].trim()}));
+ $('res').textContent='Running...';try{const r=await api('/api/evaluate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({cases})});
+  const t=el('table');t.innerHTML='<tr><th>Question</th><th>Retrieved?</th><th>Answer OK?</th></tr>';
+  r.rows.forEach(x=>{const tr=el('tr');[x.q,x.retrieval_hit?'yes':'no',x.answer_ok?'yes':'no'].forEach((v,i)=>{const td=el('td',i?(v=='yes'?'ok':'no'):'',v);tr.append(td)});t.append(tr)});
+  $('res').replaceChildren(el('p','','Retrieval accuracy: '+r.retrieval_rate+'%  |  Answer accuracy: '+r.answer_rate+'%'),t)}catch(e){$('res').textContent='Error: '+e.message}}
+load();
+</script></body></html>

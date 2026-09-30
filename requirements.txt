@@ -1,0 +1,9 @@
+flask
+gunicorn
+chromadb
+pypdf
+requests
+beautifulsoup4
+google-genai
+youtube-transcript-api>=1.0
+python-dotenv

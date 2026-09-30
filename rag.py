@@ -8,7 +8,7 @@ from google import genai
 from google.genai import types
 
 EMBED_MODEL = os.getenv("EMBED_MODEL", "gemini-embedding-001")
-CHAT_MODEL = os.getenv("CHAT_MODEL", "gemini-2.5-flash")
+CHAT_MODEL = os.getenv("CHAT_MODEL", "gemini-3.8-flash")
 NOT_FOUND = "I couldn't find this in the uploaded documents."
 
 _client = None

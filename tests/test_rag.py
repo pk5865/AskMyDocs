@@ -26,16 +26,18 @@ def test_chunk_overlap():
 
 def test_pipeline():
     a = rag.add_document("policy.txt", "Our refund policy allows refunds within 30 days of purchase. " * 3)
-    b = rag.add_document("other.txt", "Bananas grow in tropical climates and are rich in potassium. " * 3)
-    assert len(rag.list_docs()) == 2
+    assert len(rag.list_docs()) == 1
     top = rag.retrieve("how many days for refunds?", k=1)[0]
     assert top["source"] == "policy.txt"
     res = rag.answer("refund days?")
     assert "30" in res["answer"] and res["sources"]
     ev = rag.evaluate([{"q": "refund days?", "expect": "30 days"}])
     assert ev["retrieval_rate"] == 100 and ev["answer_rate"] == 100
-    rag.delete_doc(a["doc_id"])
+    rag.add_document("other.txt", "Bananas grow in tropical climates and are rich in potassium. " * 3)
     assert [d["name"] for d in rag.list_docs()] == ["other.txt"]
+    assert rag.retrieve("where do bananas grow?", k=1)[0]["source"] == "other.txt"
+    rag.delete_doc(rag.list_docs()[0]["doc_id"])
+    assert rag.list_docs() == []
 
 def test_ssrf_blocked():
     try:

@@ -2,6 +2,8 @@
 
 Ask questions about uploaded PDF/TXT files, webpages, and YouTube transcripts. The app extracts and chunks text, stores Gemini embeddings and source text in SQLite, retrieves relevant passages, then asks Gemini to answer from those passages with source citations.
 
+Only the latest successfully processed file or link is kept. If Gemini's primary chat model is temporarily unavailable, the app retries and then tries the configured Flash fallback models.
+
 **Stack:** Flask, SQLite, Gemini API, vanilla JavaScript.
 
 ## Run locally

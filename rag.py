@@ -109,6 +109,8 @@ def add_document(name, text):
     doc_id = uuid.uuid4().hex[:10]
     vectors = embed(pieces, "RETRIEVAL_DOCUMENT")
     with _connect() as db:
+        # Replace the active source only after extraction and embedding succeed.
+        db.execute("DELETE FROM chunks")
         db.executemany("INSERT INTO chunks (id, doc_id, name, chunk, text, embedding) VALUES (?, ?, ?, ?, ?, ?)", [
             (f"{doc_id}-{n}", doc_id, name, n, piece, _pack_vector(vector))
             for n, (piece, vector) in enumerate(zip(pieces, vectors))
@@ -141,17 +143,18 @@ def retrieve(question, k=4):
     return sorted(scored, key=lambda item: item["score"], reverse=True)[:k]
 
 def generate(prompt):
-    """Call Gemini. Retry when Google is busy (503/429), then try FALLBACK_MODELS from .env."""
-    models = [CHAT_MODEL] + [m.strip() for m in os.getenv("FALLBACK_MODELS", "").split(",") if m.strip()]
+    """Try the primary Gemini model, then free Flash fallbacks when the service is busy."""
+    configured = os.getenv("FALLBACK_MODELS", "gemini-3.7-flash,gemini-3.5-flash")
+    models = list(dict.fromkeys([CHAT_MODEL] + [m.strip() for m in configured.split(",") if m.strip()]))
     last = None
     for model in models:
-        for attempt in range(4):
+        for attempt in range(3):
             try:
                 return client().models.generate_content(model=model, contents=prompt).text or ""
             except Exception as e:
                 last = e
                 if any(k in str(e) for k in ("503", "429", "UNAVAILABLE")):
-                    time.sleep(2 ** attempt)  # wait 1s, 2s, 4s, 8s
+                    time.sleep(2 ** attempt)  # wait 1s, 2s, then try the next model
                 else:
                     raise
     raise last

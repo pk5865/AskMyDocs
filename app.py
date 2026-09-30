@@ -11,6 +11,10 @@ app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024  # 10 MB upload limit
 def fail(e, code=400):
     return jsonify({"error": str(e)}), code
 
+@app.errorhandler(413)
+def too_large(_e):
+    return fail("File is too large. The current upload limit is 10 MB.", 413)
+
 @app.get("/")
 def home():
     return send_from_directory("static", "index.html")
@@ -21,7 +25,10 @@ def health():
 
 @app.get("/api/docs")
 def docs():
-    return jsonify(rag.list_docs())
+    try:
+        return jsonify(rag.list_docs())
+    except Exception as e:
+        return fail(f"Could not load documents: {e}", 500)
 
 @app.delete("/api/docs/<doc_id>")
 def remove(doc_id):

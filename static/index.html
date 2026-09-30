@@ -19,7 +19,7 @@ table{width:100%;border-collapse:collapse;font-size:13px}td,th{border-bottom:1px
 <header>AskMyDocs &middot; ask questions, get answers with sources</header>
 <main>
 <div class="card"><h3>Sources</h3>
-<input type="file" id="file" accept=".pdf,.txt"><button onclick="up()">Upload file</button>
+<input type="file" id="file" accept=".pdf,.txt"><small>PDF or TXT, up to 10 MB</small><button onclick="up()">Upload file</button>
 <input id="url" placeholder="Web page or YouTube link"><button onclick="up(true)">Add link</button>
 <div id="st"></div><div id="docs"></div></div>
 <div class="card"><div class="tabs"><button id="t1" class="on" onclick="tab(1)">Ask</button><button id="t2" onclick="tab(2)">Evaluate</button></div><br>
@@ -29,7 +29,7 @@ table{width:100%;border-collapse:collapse;font-size:13px}td,th{border-bottom:1px
 </main>
 <script>
 const $=id=>document.getElementById(id);
-const api=async(u,o)=>{const r=await fetch(u,o);const j=await r.json();if(!r.ok)throw new Error(j.error||'Request failed');return j};
+const api=async(u,o)=>{const r=await fetch(u,o);const text=await r.text();let j;try{j=JSON.parse(text)}catch{const detail=text.replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim().slice(0,180);throw new Error(`Server returned HTTP ${r.status} instead of JSON${detail?': '+detail:''}`)}if(!r.ok)throw new Error(j.error||`Request failed (HTTP ${r.status})`);return j};
 function tab(n){$('p1').hidden=n!=1;$('p2').hidden=n!=2;$('t1').className=n==1?'on':'';$('t2').className=n==2?'on':''}
 function el(t,c,x){const e=document.createElement(t);if(c)e.className=c;if(x!==undefined)e.textContent=x;return e}
 async function load(){const d=await api('/api/docs');$('docs').replaceChildren(...d.map(x=>{const r=el('div','doc');

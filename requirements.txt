@@ -1,6 +1,5 @@
 flask
 gunicorn
-chromadb
 pypdf
 requests
 beautifulsoup4

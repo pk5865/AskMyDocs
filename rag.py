@@ -1,6 +1,7 @@
-import os, re, time, uuid, socket, ipaddress
+import os, re, time, uuid, socket, ipaddress, sqlite3, struct
 from urllib.parse import urlparse
-import requests, chromadb
+from pathlib import Path
+import requests
 from bs4 import BeautifulSoup
 from pypdf import PdfReader
 from google import genai
@@ -17,8 +18,29 @@ def client():
         _client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
     return _client
 
-col = chromadb.PersistentClient(path=os.getenv("CHROMA_DIR", "chroma_store")).get_or_create_collection(
-    "docs", metadata={"hnsw:space": "cosine"})
+STORE_DIR = Path(os.getenv("CHROMA_DIR", "chroma_store"))
+STORE_DIR.mkdir(parents=True, exist_ok=True)
+DB_PATH = os.getenv("ASKMYDOCS_DB", str(STORE_DIR / "askmydocs.sqlite3"))
+
+def _connect():
+    return sqlite3.connect(DB_PATH, timeout=30)
+
+with _connect() as _db:
+    _db.execute("""CREATE TABLE IF NOT EXISTS chunks (
+        id TEXT PRIMARY KEY,
+        doc_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        chunk INTEGER NOT NULL,
+        text TEXT NOT NULL,
+        embedding BLOB NOT NULL
+    )""")
+    _db.execute("CREATE INDEX IF NOT EXISTS chunks_doc_id ON chunks(doc_id)")
+
+def _pack_vector(values):
+    return struct.pack(f"<{len(values)}f", *values)
+
+def _unpack_vector(blob):
+    return struct.unpack(f"<{len(blob) // 4}f", blob)
 
 def embed(texts, task):
     """Turn text into vectors with Gemini. task = RETRIEVAL_DOCUMENT or RETRIEVAL_QUERY."""
@@ -85,30 +107,38 @@ def add_document(name, text):
     if not pieces:
         raise ValueError("No readable text found in this source")
     doc_id = uuid.uuid4().hex[:10]
-    col.add(ids=[f"{doc_id}-{n}" for n in range(len(pieces))], documents=pieces,
-            embeddings=embed(pieces, "RETRIEVAL_DOCUMENT"),
-            metadatas=[{"doc_id": doc_id, "name": name, "chunk": n} for n in range(len(pieces))])
+    vectors = embed(pieces, "RETRIEVAL_DOCUMENT")
+    with _connect() as db:
+        db.executemany("INSERT INTO chunks (id, doc_id, name, chunk, text, embedding) VALUES (?, ?, ?, ?, ?, ?)", [
+            (f"{doc_id}-{n}", doc_id, name, n, piece, _pack_vector(vector))
+            for n, (piece, vector) in enumerate(zip(pieces, vectors))
+        ])
     return {"doc_id": doc_id, "name": name, "chunks": len(pieces)}
 
 def list_docs():
-    docs = {}
-    for m in col.get(include=["metadatas"])["metadatas"]:
-        d = docs.setdefault(m["doc_id"], {"doc_id": m["doc_id"], "name": m["name"], "chunks": 0})
-        d["chunks"] += 1
-    return list(docs.values())
+    with _connect() as db:
+        rows = db.execute("SELECT doc_id, name, COUNT(*) FROM chunks GROUP BY doc_id, name ORDER BY MIN(rowid)").fetchall()
+    return [{"doc_id": doc_id, "name": name, "chunks": count} for doc_id, name, count in rows]
 
 def delete_doc(doc_id):
-    col.delete(where={"doc_id": doc_id})
+    with _connect() as db:
+        db.execute("DELETE FROM chunks WHERE doc_id = ?", (doc_id,))
 
 # ---------- 4. Retrieve + 5. Generate ----------
 def retrieve(question, k=4):
-    n = col.count()
-    if n == 0:
+    with _connect() as db:
+        rows = db.execute("SELECT text, name, chunk, embedding FROM chunks").fetchall()
+    if not rows:
         return []
-    r = col.query(query_embeddings=embed([question], "RETRIEVAL_QUERY"), n_results=min(k, n),
-                  include=["documents", "metadatas", "distances"])
-    return [{"text": t, "source": m["name"], "chunk": m["chunk"], "score": round(1 - d, 3)}
-            for t, m, d in zip(r["documents"][0], r["metadatas"][0], r["distances"][0])]
+    query = embed([question], "RETRIEVAL_QUERY")[0]
+    q_norm = sum(v * v for v in query) ** 0.5
+    scored = []
+    for text, name, chunk_no, packed in rows:
+        vector = _unpack_vector(packed)
+        denom = q_norm * (sum(v * v for v in vector) ** 0.5)
+        score = sum(a * b for a, b in zip(query, vector)) / denom if denom else 0.0
+        scored.append({"text": text, "source": name, "chunk": chunk_no, "score": round(score, 3)})
+    return sorted(scored, key=lambda item: item["score"], reverse=True)[:k]
 
 def generate(prompt):
     """Call Gemini. Retry when Google is busy (503/429), then try FALLBACK_MODELS from .env."""
